@@ -1,30 +1,40 @@
 #include "help.h"
 
-const char *main_help_fmt =
-	"nspirectl - control and manage TI-Nspire devices\n"
+char const * const main_help_fmt =
+	"nspirectl - control and manage TI-nspire devices\n"
 	"\n"
 	"Usage:\n"
-	"  %s <command> [<args>]\n"
+	"  %s [options] <command> [<args>]\n"
+	"\n"
+	"Description:\n"
+	"  A simple wrapper for the libnspire functions as a command line tool. I made\n"
+	"  this mostly because I just cant get tilp to work, but the raw functions do.\n"
+	"  If there's any mistakes or you have any suggestions, even tiny little picky\n"
+	"  ones, please dont hesitate to contact me or submit a pull request.\n"
 	"\n"
 	"Commands:\n"
 	"  send        Send a file to the device\n"
-	// "  read        Read a file from the device\n"
-//    "  list        List files on the device\n"
-//    "  move        Move or rename a file\n"
+	"  read        Read a file from the device\n"
+	// "  list        List files on the device\n"
+	// "  move        Move or rename a file\n"
 	"  info        Show OS and device information\n"
 	"  help        Show this help or help for a command\n"
+	"\n"
+	"Options:\n"
+	"  -v, --verbose     log what is being done\n"
+	"  -d, --debug       print out values as well (implies -v)\n"
 	"\n"
 	"Run '%s help <command>' for details.\n"
 ;
 
-const char *send_help_fmt =
-	"%s send - send files to the connected TI-Nspire device."
+char const * const send_help_fmt =
+	"%s send - send files to the connected TI-nspire device."
 	"\n"
 	"Usage:\n"
 	"  %s send <file>... <destination>\n"
 	"\n"
 	"Description:\n"
-	"  Copies one or more files to the specified directory on the connected TI-Nspire\n"
+	"  Copies one or more files to the specified directory on the connected TI-nspire\n"
 	"  device.\n"
 	"  \n"
 	"  The path is relative to the \"My Documents\" folder in calculator. That is the\n"
@@ -37,7 +47,16 @@ const char *send_help_fmt =
 //    "  -f, --force    Overwrite existing file\n"
 ;
 
-const char *badOption_fmt =
-	"%s: unrecognized option '%s'\n"
-	"Try '%s --help' for more information.\n"
+char const * const info_help_fmt =
+	"%s info - get information related to the connect TI-nspire device\n"
+	"\n"
+	"Usage:\n"
+	"  %s info\n"
+	"\n"
+	"Description:\n"
+	"  Prints out all the fields filled in by `nspire_device_info` and formats it.\n"
+	"  The libnspire library is missing 0x1c from the type code enum, so I assumed\n"
+	"  it's whether or not the calculator is a CAS. If thats wrong, there's any\n"
+	"  other mistakes, or you have an improvement please contant me or submit a pull\n"
+	"  request.\n"
 ;

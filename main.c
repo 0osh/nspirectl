@@ -1,34 +1,72 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <errno.h>
+
+#include <fcntl.h>
+
 #include <libnspire/nspire.h>
+
 #include "help.h"
 
 #include <stdarg.h>
 
+#define MAX_BUFFER_SIZE 65536
+
+
 int ret = 0;
+int verbose = 0;
+int debug = 0;
+
 
 int main(int argc, char *argv[]) {
 	// idek bro
 	if (argc == 0) { puts("tf there are no arguments i think your shell is broken"); return 1; }
 
 	// help command
-	if (argc == 1 || isHelpCommand(argv[1])) {
-		printf(main_help_fmt, argv[0], argv[0]);
+	if (argc == 1 || strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) {
+		printf(main_help_fmt, argv[0]);
 		return 0;
 	}
 
-	if (strcmp(argv[1], "send") == 0) {
-		if (argc < 4) {
-			printf(send_help_fmt, argv[0], argv[0]);
-			return 0;
+
+	int cmdArg_i = 1;
+
+	for (int arg_i = 1; arg_i < argc; arg_i++) {
+		if (argv[arg_i][0] == '-') {
+			if (argv[arg_i][1] == '-') {
+				if (strcmp(argv[arg_i] + 2, "verbose") == 0) { verbose = 1; }
+				else if (strcmp(argv[arg_i] + 2, "debug") == 0) { verbose = 1; debug = 1; }
+			} else if (argv[arg_i][1] == '\0') {
+				// we need an option name twin
+			} else {
+				for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
+					switch (argv[arg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
+						case 'd': debug = 1; verbose = 1; break;
+						case 'v': verbose = 1; break;
+						default: // invalid option
+							invalidGlobalOption(argv[0], argv[arg_i][shortFlag_i]);
+							return 2;
+					}
+				}
+			}
+		} else {
+			cmdArg_i = arg_i;
+			break; // i could put the code for every subcommand here but this is cleaner
 		}
+	}
+
+	if (strcmp(argv[cmdArg_i], "send") == 0) {
+		if (argc < 4) { printf(send_help_fmt, argv[0], argv[0]); return 0; }
+		for (int i = 2; i < argc; i++) { if (strcmp(argv[i], "--help") == 0) { printf(send_help_fmt, argv[0], argv[0]); return 0; }}
 
 		// init libnspire
+		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != 0) { fprintf(stderr, "Error: failed to init libnspire: %s\n", nspire_strerror(ret)); return ret; }
+
 
 		char *destArg = argv[argc-1];
 		size_t dirNameLen = strlen(destArg);
@@ -38,7 +76,7 @@ int main(int argc, char *argv[]) {
 		strcpy(dest, destArg);
 		if (destArg[dirNameLen-1] != '/') { dest[dirNameLen++] = '/'; }
 
-		for (int i = 2; i < argc - 1; i++) {
+		for (int i = cmdArg_i+1; i < argc - 1; i++) {
 			dest = realloc(dest, dirNameLen + strlen(argv[i]) + 1);
 			strcpy(dest + dirNameLen, argv[i]);
 
@@ -86,20 +124,81 @@ int main(int argc, char *argv[]) {
 			free(dest);
 		}
 
-		// free resources
+		DEBUG("Freeing recources...\n");
 		nspire_free(handle);
 
-		puts("done");
-		return ret;
-	} else if (strcmp(argv[1], "read") == 0) {
-		// nspire_file_read
-	} else if (strcmp(argv[1], "info") == 0) {
+		return 0;
+	} else if (strcmp(argv[cmdArg_i], "read") == 0) {
+		int output_fd = 1; // stdout by default
+		char *srcPath = NULL;
+		char *destPath = NULL;
+		for (int arg_i = cmdArg_i+1; arg_i < argc; arg_i++) {
+			if (argv[arg_i][0] == '-') { // is the argument a flag?
+				if (argv[arg_i][1] == '-') { // its a long flag
+					unrecognizedSubcommandOption(argv[0], "read", argv[arg_i]);
+					return 2;
+				}
+
+				for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
+					switch (argv[arg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
+						case 'o': // set output file
+							// accept `-ofile.txt` or `-o file.txt`
+							if (argv[arg_i][2] == '\0') {
+								if (arg_i + 1 < argc)  { destPath = argv[++arg_i]; }
+								else { requiresAnArgument(argv[0], 'o'); }
+							} else { destPath = argv[arg_i] + shortFlag_i + 1; }
+
+							if (output_fd != 1 && close(output_fd)) { perror("Error: failed to close original file after another output file was specified"); return errno; }
+							output_fd = open(destPath, O_WRONLY);
+							if (output_fd < 0) { perror("Error: failed to open output file"); return errno; }
+							DEBUG("Set output file to %s\n", destPath);
+							goto shortFlag_exit;
+						default: // invalid option
+							invalidSubcommandOption(argv[0], "read", argv[arg_i][shortFlag_i]);
+							return 2;
+					}
+				}
+				shortFlag_exit: // C23 extention!? ive done things like this in assembly it cant be that hard that it wasnt in og C
+			} else { srcPath = argv[arg_i]; DEBUG("Set source file to %s\n", srcPath); } // setting file to read doesnt need an argument
+		}
+		if (!srcPath) { missingOperand(argv[0], "read"); return 2; }
+
 		// init libnspire
+		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != 0) { fprintf(stderr, "Error: failed to init libnspire: %s\n", nspire_strerror(ret)); return ret; }
 
+		uint8_t buffer[MAX_BUFFER_SIZE];
+		size_t len = 0;
+
+		LOG("Reading from file...\n");
+
+		readFromFile:
+		ret = nspire_file_read(handle, srcPath, buffer, MAX_BUFFER_SIZE, &len);
+		DEBUG("Read %ld bytes\n", len);
+		if (ret != NSPIRE_ERR_SUCCESS) { fprintf(stderr, "Error: failed to read file: %s\n", nspire_strerror(ret)); return ret; }
+		DEBUG("Writing to %s\n", destPath);
+		if (write(output_fd, buffer, len) < 0) { perror("Error: failed to write data to file\n"); return errno; }
+
+		if (len >= MAX_BUFFER_SIZE) { goto readFromFile; }
+		DEBUG("Entire file read\n");
+
+		DEBUG("Freeing recources...\n");
+		nspire_free(handle);
+
+		return 0;
+	} else if (strcmp(argv[cmdArg_i], "info") == 0) {
+		if (argc >= cmdArg_i+2 && strcmp(argv[cmdArg_i+1], "--help") == 0) { printf(info_help_fmt, argv[0], argv[0]); return 0; }
+/*
+		// init libnspire
+		LOG("Initializing usb connection...\n");
+		nspire_handle_t *handle;
+		ret = nspire_init(&handle);
+		if (ret != 0) { fprintf(stderr, "Error: failed to init libnspire: %s\n", nspire_strerror(ret)); return ret; }*/
+
 		struct nspire_devinfo info = {0};
+		LOG("Getting device information..\n");
 		ret = nspire_device_info(handle, &info);
 		if (ret != NSPIRE_ERR_SUCCESS) { fprintf(stderr, "Error: failed to get info: %s\n", nspire_strerror(ret)); return ret; }
 		char const * const falseTrue_str[] = { "false", "true" };
@@ -121,7 +220,7 @@ int main(int argc, char *argv[]) {
 			case NSPIRE_BATT_LOW: batteryStatus = "Low"; break;
 			case NSPIRE_BATT_OK: batteryStatus = "OK"; break;
 			case NSPIRE_BATT_UNKNOWN: batteryStatus = "Unknown"; break;
-			default: batteryStatus = "Unknown"; break;
+			default: batteryStatus = "Invalid value"; break;
 		}
 
 		printf(
@@ -181,17 +280,20 @@ int main(int argc, char *argv[]) {
 			info.extensions.file,
 			info.extensions.os,
 
-			info.runlevel, info.runlevel == NSPIRE_RUNLEVEL_OS ? "OS" : (info.runlevel == NSPIRE_RUNLEVEL_RECOVERY ? "Recovery" : "Unknown"),
+			info.runlevel, info.runlevel == NSPIRE_RUNLEVEL_OS ? "OS" : (info.runlevel == NSPIRE_RUNLEVEL_RECOVERY ? "Recovery" : "Invalid value"),
 
 			info.versions[NSPIRE_VER_BOOT1].major, info.versions[NSPIRE_VER_BOOT1].minor, info.versions[NSPIRE_VER_BOOT1].build,
 			info.versions[NSPIRE_VER_BOOT2].major, info.versions[NSPIRE_VER_BOOT2].minor, info.versions[NSPIRE_VER_BOOT2].build,
 			info.versions[NSPIRE_VER_OS].major, info.versions[NSPIRE_VER_OS].minor, info.versions[NSPIRE_VER_OS].build
 		);
 
+		DEBUG("Freeing recources...\n");
+		nspire_free(handle);
+
 		return 0;
 	}
 
 	// invalid command
-	printf(badOption_fmt, argv[0], argv[1], argv[0]);
+	unrecognizedGlobalOption(argv[0], argv[cmdArg_i]);
 	return 1;
 }
