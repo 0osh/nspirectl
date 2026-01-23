@@ -9,7 +9,7 @@ extern const char *send_help_fmt;
 extern const char *badOption_fmt;
 
 static inline int isHelpCommand(char *string) {
-    return strcmp(string, "help") == 0 || strcmp(string, "--help") == 0;
+	return strcmp(string, "help") == 0 || strcmp(string, "--help") == 0;
 }
 
 #endif
