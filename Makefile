@@ -1,10 +1,11 @@
 CC := gcc
 TARGET := nspirectl
-SRC := main.c
+SRC := main.c help.c
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)
 
 CFLAGS := -MMD -Wall -Wextra -Ofast
+LDFLAGS := -lnspire
 
 
 # % = wildcard
@@ -16,7 +17,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	@echo "Linking objects -> target ($@)"
-	@$(CC) -o $@ $(OBJ)
+	@$(CC) $(LDFLAGS) -o $@ $(OBJ)
 
 %.o: %.c
 	@echo "Compiling $< -> $@"
