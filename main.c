@@ -28,11 +28,8 @@ int main(int argc, char *argv[]) {
 	// idek bro
 	if (argc == 0) { puts("tf there are no arguments i think your shell is broken"); return 1; }
 
-	// help command
-	if (argc == 1 || strcmp(argv[1], "help") == 0 || strcmp(argv[1], "--help") == 0) {
-		printf(main_help_fmt, argv[0], argv[0], argv[0]);
-		return 0;
-	}
+	// help if theres no input
+	if (argc == 1) { printMainHelp(); return 0; }
 
 
 	int cmdArg_i = 1;
@@ -40,8 +37,9 @@ int main(int argc, char *argv[]) {
 	for (int arg_i = 1; arg_i < argc; arg_i++) {
 		if (argv[arg_i][0] == '-') {
 			if (argv[arg_i][1] == '-') {
-				if (strcmp(argv[arg_i] + 2, "verbose") == 0) { verbose = 1; }
-				else if (strcmp(argv[arg_i] + 2, "debug") == 0) { verbose = 1; debug = 1; }
+				if (strcmp(argv[arg_i] + 2, "verbose") == 0) { verbose = 1; DEBUG("Verbose logging enabled"); }
+				if (strcmp(argv[arg_i] + 2, "help") == 0) { printMainHelp(); return 0; }
+				else if (strcmp(argv[arg_i] + 2, "debug") == 0) { verbose = 1; debug = 1; DEBUG("Debug logging enabled"); }
 			} else if (argv[arg_i][1] == '\0') {
 				// we need an option name twin
 			} else {
@@ -49,9 +47,7 @@ int main(int argc, char *argv[]) {
 					switch (argv[arg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
 						case 'v': verbose = 1; break;
 						case 'd': debug = 1; verbose = 1; break;
-						default: // invalid option
-							invalidGlobalOption(argv[arg_i][shortFlag_i]);
-							return 2;
+						default:  invalidGlobalOption(argv[arg_i][shortFlag_i]); return 2;
 					}
 				}
 			}
@@ -61,13 +57,14 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	printf(main_help_fmt, argv[0], argv[0], argv[0]);
+	printMainHelp();
 	return 2;
 
 	parseSubcommand:
 	if (strcmp(argv[cmdArg_i], "send") == 0) {
-		for (int i = cmdArg_i+1; i < argc; i++) { if (strcmp(argv[i], "--help") == 0) { printf(send_help_fmt, argv[0], argv[0]); return 0; }}
-		if (argc-1 < cmdArg_i + 2) { missingOperand("send"); return 2; }
+		for (int i = cmdArg_i+1; i < argc; i++) { if (strcmp(argv[i], "--help") == 0) { printSendHelp(); }}
+		if (argc-1 < cmdArg_i + 1) { missingNamedOperand("send", "file"); return 2; }
+		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("send", "destination"); return 2; }
 
 		// init libnspire
 		LOG("Initializing usb connection...\n");
@@ -143,7 +140,7 @@ int main(int argc, char *argv[]) {
 		for (int arg_i = cmdArg_i+1; arg_i < argc; arg_i++) {
 			if (argv[arg_i][0] == '-') { // is the argument a flag?
 				if (argv[arg_i][1] == '-') { // its a long flag
-					if (strcmp(argv[arg_i] + 2, "help") == 0) { printf(read_help_fmt, argv[0], argv[0]); return 0; }
+					if (strcmp(argv[arg_i] + 2, "help") == 0) { printReadHelp(); }
 					else { unrecognizedSubcommandOption("read", argv[arg_i]); return 2; }
 				} else { // its a short flag
 					for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
@@ -156,7 +153,7 @@ int main(int argc, char *argv[]) {
 								} else { destPath = argv[arg_i] + shortFlag_i + 1; }
 
 								if (output_fd != 1 && close(output_fd)) { perror("Error: failed to close original file after another output file was specified, leaving open"); }
-								output_fd = open(destPath, O_WRONLY);
+								output_fd = open(destPath, O_WRONLY | O_CREAT, 0755);
 								if (output_fd < 0) { perror("[FATAL] failed to open output file"); return errno; }
 								DEBUG("Set output file to %s\n", destPath);
 								goto shortFlag_exit;
@@ -204,13 +201,14 @@ int main(int argc, char *argv[]) {
 	} else if (strcmp(argv[cmdArg_i], "move") == 0 || strcmp(argv[cmdArg_i], "copy") == 0) {
 		char *command = argv[cmdArg_i];
 		if (argc - 1 >= cmdArg_i+1) {
-			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printf(moveCopy_help_fmt, argv[0], argv[0], argv[0], argv[0], argv[0], argv[0]); return 0; }
+			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printMoveCopyHelp(); }
 			else if (argv[cmdArg_i+1][0] == '-') {
 				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption(command, argv[cmdArg_i+1]); return 2; }
 				else { invalidSubcommandOption(command, argv[cmdArg_i+1][1]); return 2; }
 			}
 		}
-		if (argc-1 < cmdArg_i + 2) { missingOperand(command); return 2; }
+		if (argc-1 < cmdArg_i + 1) { missingNamedOperand(command, "file"); return 2; }
+		if (argc-1 < cmdArg_i + 2) { missingNamedOperand(command, "destination"); return 2; }
 
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
@@ -273,7 +271,7 @@ int main(int argc, char *argv[]) {
 			if (argv[arg_i][0] == '-') { // is the argument a flag?
 				if (argv[arg_i][1] == '-') { // its a long flag
 					if (strcmp(argv[arg_i] + 2, "no-format") == 0) { format = 0; DEBUG("Disabled output formatting\n"); }
-					else if (strcmp(argv[arg_i] + 2, "help") == 0) { printf(list_help_fmt, argv[0], argv[0]); return 0; }
+					else if (strcmp(argv[arg_i] + 2, "help") == 0) { printListHelp(); }
 					else { unrecognizedSubcommandOption("list", argv[arg_i]); return 2; }
 				} else { // its a short flag
 					invalidSubcommandOption("list", argv[arg_i][1]);
@@ -328,7 +326,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	} else if (strcmp(argv[cmdArg_i], "info") == 0) {
 		if (argc - 1 >= cmdArg_i+1) {
-			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printf(info_help_fmt, argv[0], argv[0]); return 0; }
+			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printInfoHelp(); }
 			else if (argv[cmdArg_i+1][0] == '-') {
 				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption("info", argv[cmdArg_i+1]); return 2; }
 				else { invalidSubcommandOption("info", argv[cmdArg_i+1][1]); return 2; }
@@ -435,9 +433,31 @@ int main(int argc, char *argv[]) {
 		nspire_free(handle);
 
 		return 0;
+	} else if (strcmp(argv[cmdArg_i], "help") == 0) {
+		for (int arg_i = cmdArg_i+1; arg_i < argc; arg_i++) {
+			if (argv[arg_i][0] == '-') { // is the argument a flag?
+				if (argv[arg_i][1] == '-') { // its a long flag
+					if (strcmp(argv[arg_i] + 2, "help") == 0) { printHelpHelp(); return 0; }
+					else { unrecognizedSubcommandOption("help", argv[arg_i]); return 2; }
+				} else { // its a short flag
+					invalidSubcommandOption("help", argv[arg_i][1]);
+					return 2;
+				}
+			} else {
+				fprintf(stderr, "%s: unknown command '%s'\nTry '%s help --help' for more information.\n", argv[0], argv[arg_i], argv[0]);
+				return 2;
+			}
+		}
+
+		if (strcmp(argv[cmdArg_i+1], "send") == 0) { printSendHelp(); return 0; }
+		if (strcmp(argv[cmdArg_i+1], "read") == 0) { printReadHelp(); return 0; }
+		if (strcmp(argv[cmdArg_i+1], "list") == 0) { printListHelp(); return 0; }
+		if (strcmp(argv[cmdArg_i+1], "move") == 0 || strcmp(argv[cmdArg_i+1], "copy") == 0) { printMoveCopyHelp(); return 0; }
+		if (strcmp(argv[cmdArg_i+1], "info") == 0) { printInfoHelp(); return 0; }
+		if (strcmp(argv[cmdArg_i+1], "help") == 0) { printHelpHelp(); return 0; }
 	}
 
 	// invalid command
-	unrecognizedGlobalOption(argv[cmdArg_i]);
+	fprintf(stderr, "%s: unknown command '%s'\nTry '%s --help' for more information.\n", argv[0], argv[cmdArg_i], argv[0]);
 	return 1;
 }

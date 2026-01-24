@@ -1,6 +1,6 @@
 CC := gcc
 TARGET := nspirectl
-SRC := main.c help.c
+SRC := main.c
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)
 
