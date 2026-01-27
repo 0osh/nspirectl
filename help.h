@@ -3,9 +3,6 @@
 
 #include <stdio.h>
 
-#define LOG(message, ...) if (verbose) { fprintf(stderr, "[LOG] " message, ##__VA_ARGS__); }
-#define DEBUG(message, ...) if (debug) { fprintf(stderr, "[DEBUG] " message, ##__VA_ARGS__); }
-
 #define requiresAnArgument(option) fprintf(stderr, "%s: option requires an argument -- '%c'\nTry '%s --help' for more information.\n", argv[0], option, argv[0])
 #define missingOperand(cmd) fprintf(stderr, "%s %s: missing operand\nTry '%s %s --help' for more information.\n", argv[0], cmd, argv[0], cmd)
 #define missingNamedOperand(cmd, operand) fprintf(stderr, "%s %s: missing %s operand\nTry '%s %s --help' for more information.\n", argv[0], cmd, operand, argv[0], cmd)
@@ -37,9 +34,10 @@ char const * const main_help_fmt =
 	"Commands:\n"
 	"  send        Send files to the device\n"
 	"  read        Read a file from the device\n"
-	"  list        List files on the device\n"
-	"  move        Move or rename files\n"
-	"  copy        Duplicate files\n"
+	"  move, mv    Move or rename files\n"
+	"  copy, cp    Duplicate files\n"
+	"  list, ls    List files in a folder\n"
+	// "  del, rm     Delete a file or directory\n"
 	"  info        Show OS and device information\n"
 	"  help        Show this help or help for a command\n"
 	"\n"
@@ -58,8 +56,8 @@ char const * const send_help_fmt =
 	"  %s send <file>... <destination>\n"
 	"\n"
 	"Description:\n"
-	"  Copies one or more files to the specified directory on the connected TI-nspire\n"
-	"  device.\n"
+	"  Copies one or more files or directories to the specified location on the\n"
+	"  calculator.\n"
 	"  \n"
 	"  The path is relative to the \"My Documents\" folder in calculator. That is the\n"
 	"  folder that every file is in when you press \"Browse\" in the home screen.\n"
@@ -100,7 +98,7 @@ char const * const list_help_fmt =
 ;
 
 char const * const moveCopy_help_fmt =
-	"%s move, %s copy - move or copy a file within the calculator\n"
+	"%s move, %s copy - move or copy a file or directory within the calculator\n"
 	"\n"
 	"Usage:\n"
 	"  %s move [option]... <file>... <directory>\n"

@@ -2,48 +2,60 @@
 printf("here\n"); fflush(stdout);
 */
 
+// standard libs
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/stat.h> // check file type in send command
+#include <dirent.h> // get files in dir in send command
 
+// just macros
 #include <fcntl.h>
 
+// other
 #include <libnspire/nspire.h>
-
 #include "help.h"
 
-#include <stdarg.h>
+// error printf and nsprire error printf
+#define perrorf(fmt, ...) fprintf(stderr, fmt": %s\n", ##__VA_ARGS__, strerror(ret))
+#define nperrorf(fmt, ...) fprintf(stderr, fmt": %s\n", ##__VA_ARGS__, nspire_strerror(ret))
+#define LOG(message, ...) if (verbose) { fprintf(stderr, "[LOG] " message, ##__VA_ARGS__); }
+#define DEBUG(message, ...) if (debug) { fprintf(stderr, "[DEBUG] " message, ##__VA_ARGS__); }
 
-// perror for nspire
-#define perrorn(fmt, ...) fprintf(stderr, fmt": %s\n", ##__VA_ARGS__, nspire_strerror(ret))
 
+int ret = 0; // dont have to worry about making new ret variables everywhere. just dont use without setting before hand
+int verbose = 0; // -v flag
+int debug = 0; // -d flag
 
-int ret = 0; // dont have to worry about making new ret variables everywhere. just dont use without setting
-int verbose = 0;
-int debug = 0;
-
+// for qsort
 int sortDirInfo(const void *arg1, const void *arg2) {
 	return strcmp(((struct nspire_dir_item *) arg1)->name, ((struct nspire_dir_item *) arg2)->name);
 }
 
+// info for a malloc'd path variable to pass around
+struct dynPath {
+	char *path;
+	size_t len;
+	size_t allocLen;
+};
+
+// so one of the function calls arent messy
+// cant believe i need all these vars...
 struct cmd_ctx {
 	nspire_handle_t *handle;
 	struct nspire_dir_item attr;
 
-	char *dest;
-	size_t destLen;
-	size_t destAllocLen;
+	struct dynPath path;
 
 	int cmdArg_i;
 	int argc;
-	char **argv;
+	char **argv; // first thing i dont like about c: cant assign *char[] to *char[] because arrays arent assignable (but *char[] to **char works and is the same functionality)
 };
 
-// /path/folder0
-//  path/folder/
 
+// compare 2 paths (without including slashes at the start or end)
 int pathcmp(const char *s1, const char *s2) {
 	int i = s1[0] == '/', j = s2[0] == '/';
 
@@ -57,60 +69,171 @@ int pathcmp(const char *s1, const char *s2) {
 	}
 }
 
-int resolveDest(struct cmd_ctx *ctx) {
-	// i aint typing out ctx-> every time
-	char *dest = ctx->argv[ctx->argc-1];
-	int destLen = strlen(dest);
-
-	LOG("Getting destination type...\n");
-	ret = nspire_attr(ctx->handle, dest, &ctx->attr);
-	if (ret == -NSPIRE_ERR_NONEXIST) {
-		// if dest is a directory OR there is more than 1 file (means dest must be a directory)
-		// error out because the directory doesent exist
-		if (dest[destLen-1] == '/' || ctx->argc-1 > ctx->cmdArg_i+2) { fprintf(stderr, "[FATAL] path `%s` doesnt exist\n", dest); return -1; }
-		// else its a file that doesnt exist, so we can put out file there (this will skip past the else if and else and then return)
-	} else if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to get file info"); return ret; }
-	else {
-		switch (ctx->attr.type) {
-			case NSPIRE_DIR:
-				dest = malloc(destLen + 5);
-				strcpy(dest, ctx->argv[ctx->argc-1]);
-				if (dest[destLen-1] != '/') { dest[destLen++] = '/'; dest[destLen] = '\0'; }
-				break;
-			case NSPIRE_FILE: fprintf(stderr, "[FATAL] cannot write at `%s`: File exists\n", dest); return -NSPIRE_ERR_EXISTS;
-			default: fprintf(stderr, "[FATAL] invalid file type (code %d)\n", ctx->attr.type); return -1;
-		}
-	}
-
-	ctx->dest = dest;
-	ctx->destLen = destLen;
-
+// init a dynPath struct with a file (and its length for efficiency)
+int initPathWithFile(struct dynPath *ctx, const char *path, size_t pathLen) {
+	ctx->len = pathLen;
+	ctx->allocLen = ctx->len + 2; // len + potential '/' + '\0'
+	ctx->path = malloc(ctx->allocLen);
+	if (!ctx->path) { perrorf("[FATAL] Failed to malloc %zu bytes for path variable", ctx->allocLen); return errno; }
+	memcpy(ctx->path, path, ctx->len);
+	ctx->path[ctx->len] = '\0';
 	return 0;
 }
 
-int appendBasename(struct cmd_ctx *ctx, char *argvi) {
-	char *basename;
-	if (ctx->attr.type == NSPIRE_DIR) {
-		basename = strrchr(argvi, '/');
-		if (!basename) { basename = argvi; }
-		else { basename++; }
+// init a dynPath struct with a directory (and its length for efficiency)
+int initPathWithDir(struct dynPath *ctx, const char *path, size_t pathLen) {
+	ret = initPathWithFile(ctx, path, pathLen);
+	if (ret != 0) { return ret; }
+	if (ctx->len > 0 && ctx->path[ctx->len-1] != '/') { ctx->path[ctx->len++] = '/'; ctx->path[ctx->len] = '\0'; }
+	return 0;
+}
 
-		size_t newDestLen = ctx->destLen + strlen(argvi) + 1;
-		if (newDestLen > ctx->destAllocLen) { // dont realloc shorter, waste of time
-			ctx->destAllocLen = newDestLen * 2; // less reallocs
-			ctx->dest = realloc(ctx->dest, ctx->destLen);
-			if (!ctx->dest) { perror("[Fatal]: Failed to realloc file destination variable"); return errno; }
+int resolveDir(struct cmd_ctx *ctx) {
+	ctx->path.path = ctx->argv[ctx->argc-1];
+	ctx->path.len = strlen(ctx->path.path);
+
+	DEBUG("Getting destination type...\n");
+	ret = nspire_attr(ctx->handle, ctx->path.path, &ctx->attr);
+	if (ret == -NSPIRE_ERR_NONEXIST) {
+		// if path is a directory OR there is more than 1 file (means path must be a directory)
+		// error out because the directory doesent exist
+		if ((ctx->path.path)[ctx->path.len-1] == '/' || ctx->argc-1 > ctx->cmdArg_i+2) { fprintf(stderr, "[FATAL] path `%s` doesnt exist\n", ctx->path.path); return -NSPIRE_ERR_NONEXIST; }
+		DEBUG("path %s is a non-existing file\n", ctx->path.path);
+		return initPathWithFile(&ctx->path, ctx->path.path, ctx->path.len); // return 0 if it was ok too
+	} else if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to get file info"); return ret; }
+	else {
+		switch (ctx->attr.type) {
+			case NSPIRE_DIR:
+				DEBUG("path %s is an existing directory\n", ctx->path.path);
+				return initPathWithDir(&ctx->path, ctx->path.path, ctx->path.len); // return 0 if it was ok too
+			case NSPIRE_FILE: fprintf(stderr, "[FATAL] cannot write at `%s`: File exists\n", ctx->path.path); return -NSPIRE_ERR_EXISTS;
+			default: fprintf(stderr, "[FATAL] invalid file type (code %d)\n", ctx->attr.type); return -NSPIRE_ERR_INVALID;
 		}
-		strcpy(ctx->dest + ctx->destLen, basename);
+	}
+}
+
+int setBasename(struct dynPath *dest, char *src) {
+	size_t srcLen = strlen(src);
+
+	// strrchr(src, '/') but dont include an ending slash
+	int i = srcLen-2; // dont include slash at the end
+	while (i >= 0 && src[i] != '/') { i--; }
+	char *srcBasename = src + i + 1; // +1 so we dont include / in basename
+
+	size_t newDestLen = dest->len + srcLen + 5; // plenty of extra for extra slashes
+	if (newDestLen > dest->allocLen) { // dont realloc to a shorter array, waste of time
+		dest->allocLen = newDestLen * 2; // x2 for even less reallocs
+		dest->path = realloc(dest->path, dest->allocLen);
+		if (!dest->path) { perrorf("[FATAL] Failed to realloc %zu bytes file destination variable", dest->allocLen); return errno; }
+	}
+	strcpy(dest->path + dest->len, srcBasename);
+
+	DEBUG("Set basename (path = %s)\n", dest->path);
+	return 0;
+}
+
+int sendPath(struct nspire_handle *handle, char *src, char *dest) {
+	size_t srcLen = strlen(src);
+	size_t destLen = strlen(dest);
+
+	// checking type
+	struct stat fileStat;
+	stat(src, &fileStat);
+	if (S_ISDIR(fileStat.st_mode)) { // were gonna recuse through directories
+		DEBUG("Making directory %s...\n", src);
+		ret = nspire_dir_create(handle, src);
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed create directory %s", src); return ret; }
+		ret = nspire_dir_move(handle, src, dest);
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed move directory %s to %s", src, dest); return ret; }
+
+		// add slash if needed
+		char *originalPath = src;
+		if (src[srcLen-1] != '/') {
+			src = malloc(srcLen+2);
+			if (!src) { perrorf("[FATAL]: Failed to malloc %zu bytes for file path variable", srcLen+2); return errno; }
+			strcpy(src, originalPath);
+			src[srcLen++] = '/';
+			src[srcLen] = '\0';
+		}
+
+		DIR *dir = opendir(src);
+		if (!dir) { perrorf("[FATAL] Failed to open directory %s", src); }
+		struct dirent *entry;
+
+		struct dynPath fullDest = {0};
+		initPathWithDir(&fullDest, dest, destLen);
+		struct dynPath fullSrc = {0};
+		initPathWithDir(&fullSrc, src, srcLen);
+		for (;;) {
+			errno = 0; // see the RETURN VALUE section at readdir(3)
+			entry = readdir(dir);
+			if (entry == NULL) { break; }
+
+			char *name = entry->d_name; // shorten variable name
+			// dont include . and ..
+			if ((name[0] == '.' && name[1] == '\0') || (name[0] == '.' && name[1] == '.' && name[2] == '\0')) { continue; }
+
+			ret = setBasename(&fullDest, name); if (ret != 0) { return ret; } // /path/to/dest -> /path/to/dest/file.tns
+			ret = setBasename(&fullSrc, name); if (ret != 0) { return ret; } // /path/to/src -> /path/to/src/file.tns
+			ret = sendPath(handle, fullSrc.path, fullDest.path); if (ret != 0) { return ret; } // send it
+		}
+
+		closedir(dir);
+		if (src != originalPath) { free(src); }
+		free(fullDest.path);
+		// error handling for readdir()
+		if (errno != 0) { perrorf("[FATAL] failed to get file in %s (readdir() failed)", src); return errno; }
+		return 0;
+	} else if (!S_ISREG(fileStat.st_mode)) { fprintf(stderr, "[ERROR] file %s is not a regular file or directory, skipping\n", src); return 1; }
+	// else, src is a file
+
+	// get file
+	DEBUG("Reading file from disk...\n");
+	FILE *file_fd = fopen(src, "rb");
+	if (!file_fd) { perrorf("[FATAL] failed to open file %s", src); return errno; }
+
+	ret = fseek(file_fd, 0, SEEK_END);
+	if (ret < 0) { perrorf("[FATAL] failed to fseek to file %s end", src); return errno; }
+
+	long file_len = ftell(file_fd);
+	if (file_len < 0) { perrorf("[FATAL] failed to get file %s length", src); return errno; }
+	else if (file_len == 0) {
+		sendEmptyFileConfirmation: // i could use a do while but its harder to read and i like gotos
+		fputs("[WARNING] file length is 0. Continue? (y/n)  ", stderr);
+		char c = getchar();
+		if (c == 'n' || c == 'N') { return 0; }
+		else if (c != 'y' && c != 'Y') { goto sendEmptyFileConfirmation; }
 	}
 
+	ret = fseek(file_fd, 0, SEEK_SET);
+	if (ret < 0) { perrorf("[FATAL] failed to fseek back to file %s start", src); return errno; }
+
+	char *file_data = malloc(file_len + 1);
+	fread(file_data, file_len, 1, file_fd);
+	fclose(file_fd);
+	file_data[file_len] = '\0';
+
+	// send it to the calculator (with .tns if needed)
+	LOG("Uploading %s to %s\n", src, dest);
+	if (strcmp(dest+destLen-4, ".tns") != 0) {
+		char *ogDest = dest;
+		dest = malloc(destLen + 5); // len + strlen(".tns") + '\0'
+		strcpy(dest, ogDest);
+		strcpy(dest + destLen, ".tns");
+		DEBUG("Added .tns extention (%s)\n", dest);
+		ret = nspire_file_write(handle, dest, file_data, file_len);
+		free(dest);
+	} else { ret = nspire_file_write(handle, dest, file_data, file_len); }
+	if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to send file %s", src); free(file_data); return ret; }
+
+	free(file_data);
 	return 0;
 }
 
 
 int main(int argc, char *argv[]) {
 	// idek bro
-	if (argc == 0) { puts("tf there are no arguments i think your shell is broken"); return 1; }
+	if (argc == 0) { puts("tf there are no arguments i think your shell is broken"); return 2; }
 
 	// help if theres no input
 	if (argc == 1) { printMainHelp(); return 0; }
@@ -125,7 +248,8 @@ int main(int argc, char *argv[]) {
 				if (strcmp(argv[arg_i] + 2, "help") == 0) { printMainHelp(); return 0; }
 				else if (strcmp(argv[arg_i] + 2, "debug") == 0) { verbose = 1; debug = 1; DEBUG("Debug logging enabled"); }
 			} else if (argv[arg_i][1] == '\0') {
-				// we need an option name twin
+				fprintf(stderr, "we need an option name twin\n");
+				return 2;
 			} else {
 				for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
 					switch (argv[arg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
@@ -154,7 +278,7 @@ int main(int argc, char *argv[]) {
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to init libnspire"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
 
 		struct cmd_ctx ctx = {0};
 		ctx.handle = handle;
@@ -162,62 +286,20 @@ int main(int argc, char *argv[]) {
 		ctx.argc = argc;
 		ctx.cmdArg_i = cmdArg_i;
 
-		ret = resolveDest(&ctx);
-		if (ret != 0) { return ret; }
+		ret = resolveDir(&ctx);
+		if (ret != 0) { return 1; }
 
 		for (int i = cmdArg_i+1; i < argc - 1; i++) {
-			ret = appendBasename(&ctx, argv[i]);
-			if (ret != 0) { return ret; }
-
-
-			// get file
-			FILE *file_fd = fopen(argv[i], "rb");
-			if (!file_fd) { perror("[FATAL] failed to open file"); return errno; }
-
-			ret = fseek(file_fd, 0, SEEK_END);
-			if (ret < 0) { perror("[FATAL] failed to fseek to file end"); return errno; }
-
-			long file_len = ftell(file_fd);
-			if (file_len < 0) { perror("[FATAL] failed to get file length"); return errno; }
-			else if (file_len == 0) {
-				// i could use a do while but its harder to read
-				sendEmptyFileConfirmation:
-				fputs("[WARNING] file length is 0. Continue? (y/n)  ", stderr);
-				char c = getchar();
-				if (c == 'n' || c == 'N') { return 0; }
-				else if (c != 'y' && c != 'Y') { goto sendEmptyFileConfirmation; }
+			if (ctx.attr.type == NSPIRE_DIR) {
+				ret = setBasename(&ctx.path, argv[i]);
+				if (ret != 0) { return 1; }
 			}
 
-			fseek(file_fd, 0, SEEK_SET);
-			if (ret < 0) { perror("[FATAL] failed to fseek back to file start"); return errno; }
-
-			char *file_data = malloc(file_len + 1);
-			fread(file_data, file_len, 1, file_fd);
-			fclose(file_fd);
-			file_data[file_len] = '\0';
-
-			// send it to the calculator
-			LOG("Uploading %s\n", argv[i]);
-			ret = nspire_file_write(handle, argv[i], file_data, file_len);
-			if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to send file %s", argv[i]); return ret; }
-
-			char *srcBasename = strrchr(argv[i], '/');
-			if (!srcBasename) { srcBasename = argv[i]; }
-			if (strchr(ctx.dest+1, '/') != NULL || pathcmp(ctx.dest, srcBasename) != 0) { // no other slash; the file is at root and has the same name
-				// ret = nspire_file_move(handle, "/test.tns", "/testfolder/test.tns"); // stupid function broken >:(
-				// if (ret != NSPIRE_ERR_SUCCESS) { fprintf(stderr, "[FATAL] failed to move file %s to %s: %s\n", argv[i], ctx.dest, nspire_strerror(ret)); return ret; }
-
-				DEBUG("Copying to %s\n", ctx.dest);
-				ret = nspire_file_copy(handle, argv[i], ctx.dest);
-				if (ret != NSPIRE_ERR_SUCCESS) { fprintf(stderr, "[FATAL] failed to copy file %s to %s: %s\n", argv[i], ctx.dest, nspire_strerror(ret)); return ret; }
-				DEBUG("Removing original\n");
-				ret = nspire_file_delete(handle, argv[i]);
-				if (ret != NSPIRE_ERR_SUCCESS) { fprintf(stderr, "[FATAL] failed to remove file %s: %s\n", argv[i], nspire_strerror(ret)); return ret; }
-			}
+			sendPath(handle, argv[i], ctx.path.path);
 		}
 
 		DEBUG("Freeing resources...\n");
-		if (ctx.dest != argv[argc-1]) { free(ctx.dest); }
+		if (ctx.path.path != argv[argc-2]) { free(ctx.path.path); }
 		nspire_free(handle);
 
 		return 0;
@@ -240,9 +322,9 @@ int main(int argc, char *argv[]) {
 									else { requiresAnArgument('o'); }
 								} else { destPath = argv[arg_i] + shortFlag_i + 1; }
 
-								if (output_fd != 1 && close(output_fd)) { perror("Error: failed to close original file after another output file was specified, leaving open"); }
+								if (output_fd != 1 && close(output_fd)) { perrorf("[ERROR] failed to close original file after another output file was specified, leaving open"); }
 								output_fd = open(destPath, O_WRONLY | O_CREAT, 0755);
-								if (output_fd < 0) { perror("[FATAL] failed to open output file"); return errno; }
+								if (output_fd < 0) { perrorf("[FATAL] failed to open output file %s", destPath); return 1; }
 								DEBUG("Set output file to %s\n", destPath);
 								goto shortFlag_exit;
 							default: // invalid option
@@ -261,32 +343,32 @@ int main(int argc, char *argv[]) {
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to init libnspire"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
 
 		LOG("Getting file size...\n");
 		struct nspire_dir_item attr = {0};
 		ret = nspire_attr(handle, srcPath, &attr);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to get file info"); return ret; }
-		DEBUG("Name: %s, size: %ld bytes, date: %ld, type: %d\n", attr.name, attr.size, attr.date, attr.type);
-		if (attr.size == 0) { attr.size = 1280000; DEBUG("File size overridden to %ld\n", attr.size); }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to get file info"); return 1; }
+		DEBUG("Name: %s, size: %zu bytes, date: %ld, type: %d\n", attr.name, attr.size, attr.date, attr.type);
+		if (attr.size == 0) { attr.size = 1280000; DEBUG("File size overridden to %zu\n", attr.size); }
 
 		size_t len = 0;
 		uint8_t *buffer = malloc(attr.size);
-		if (!buffer) { perror("[FATAL] failed to allocate memory for read buffer"); return errno; }
+		if (!buffer) { perrorf("[FATAL] failed to allocate %zu bytes for read buffer", attr.size); return 1; }
 
 		LOG("Reading from file...\n");
 		ret = nspire_file_read(handle, srcPath, buffer, attr.size, &len);
-		if (ret != NSPIRE_ERR_SUCCESS) {perrorn("[FATAL] failed to read file"); return ret; }
-		DEBUG("Read %ld bytes\n", len);
+		if (ret != NSPIRE_ERR_SUCCESS) {nperrorf("[FATAL] failed to read file"); return 1; }
+		DEBUG("Read %zu bytes\n", len);
 		DEBUG("Writing to %s\n", destPath);
-		if (write(output_fd, buffer, attr.size) < 0) { perror("[FATAL] failed to write data to file\n"); return errno; }
+		if (write(output_fd, buffer, attr.size) < 0) { perrorf("[FATAL] failed to write %zu bytes to file %s\n", len, destPath); return errno; }
 
 		DEBUG("Freeing recources...\n");
 		nspire_free(handle);
 		free(buffer);
 
 		return 0;
-	} else if (strcmp(argv[cmdArg_i], "move") == 0 || strcmp(argv[cmdArg_i], "copy") == 0) {
+	} else if (strcmp(argv[cmdArg_i],"move")==0 || strcmp(argv[cmdArg_i],"mv")==0 || strcmp(argv[cmdArg_i],"copy")==0 || strcmp(argv[cmdArg_i],"cp")==0) {
 		char *command = argv[cmdArg_i];
 		if (argc - 1 >= cmdArg_i+1) {
 			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printMoveCopyHelp(); }
@@ -302,7 +384,7 @@ int main(int argc, char *argv[]) {
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to init libnspire"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
 
 		struct cmd_ctx ctx = {0};
 		ctx.handle = handle;
@@ -310,37 +392,33 @@ int main(int argc, char *argv[]) {
 		ctx.argc = argc;
 		ctx.cmdArg_i = cmdArg_i;
 
-		ret = resolveDest(&ctx);
-		if (ret != 0) { return ret; }
+		ret = resolveDir(&ctx);
+		if (ret != 0) { return 1; }
+		DEBUG("ctx.path.path = %s\n", ctx.path.path);
 
 		for (int i = cmdArg_i + 1; i < argc - 1; i++) {
-			ret = appendBasename(&ctx, argv[i]);
-			if (ret != 0) { return ret; }
-
-			struct nspire_dir_item attr;
-			ret = nspire_attr(handle, ctx.dest, &attr);
-			if (ret != NSPIRE_ERR_NONEXIST) {
-				if (ret == NSPIRE_ERR_SUCCESS) { fprintf(stderr, "[FATAL] cannot copy to `%s`: File exists\n", ctx.dest); return -NSPIRE_ERR_EXISTS; }
-				else { perrorn("[FATAL] failed to get info for `%s`", ctx.dest); return ret; }
-
+			if (ctx.attr.type == NSPIRE_DIR) {
+				ret = setBasename(&ctx.path, argv[i]);
+				if (ret != 0) { return 1; }
 			}
 
 			// ret = nspire_file_move(handle, "/test.tns", "/testfolder/test.tns"); // stupid function broken in the calculator
-			LOG("Copying %s to %s\n", argv[i], ctx.dest);
-			ret = nspire_file_copy(handle, argv[i], ctx.dest);
-			if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to copy file %s to %s", argv[i], ctx.dest); return ret; }
+			LOG("Copying %s to %s\n", argv[i], ctx.path.path);
+			ret = nspire_file_copy(handle, argv[i], ctx.path.path);
+			if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to copy file %s to %s", argv[i], ctx.path.path); return 1; }
 			if (command[0] == 'm') { // m for move
 				DEBUG("Removing original (%s)\n", argv[i]);
 				ret = nspire_file_delete(handle, argv[i]);
-				if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to remove file %s", argv[i]); return ret; }
+				if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to remove file %s", argv[i]); return 1; }
 			}
 		}
 
 		DEBUG("Freeing recources...\n");
+		if (ctx.path.path != argv[argc-2]) { free(ctx.path.path); }
 		nspire_free(handle);
 
 		return 0;
-	} else if (strcmp(argv[cmdArg_i], "list") == 0) {
+	} else if (strcmp(argv[cmdArg_i], "list") == 0 || strcmp(argv[cmdArg_i], "ls") == 0) {
 		uint8_t format = 1;
 		char *dirPath = "/";
 		for (int arg_i = cmdArg_i+1; arg_i < argc; arg_i++) {
@@ -361,13 +439,13 @@ int main(int argc, char *argv[]) {
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to init libnspire"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
 
 		struct nspire_dir_info *dirInfo;
 
 		LOG("Getting list...\n");
 		ret = nspire_dirlist(handle, dirPath, &dirInfo);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to get file list"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to get file list"); return 1; }
 
 		// your cpu is gonna be so happy it doesnt have to do extra work for nothing
 		if (dirInfo->num == 1) { puts(dirInfo->items[0].name); goto list_cleanUp; }
@@ -378,7 +456,7 @@ int main(int argc, char *argv[]) {
 
 		FILE *outputStream = format ? popen("column", "w") : stdout;
 		if (!outputStream) {
-			perror("Error: Failed to open pipe to column command to format list, printing without formatting instead");
+			perrorf("[ERROR] Failed to open pipe to column command to format list, printing without formatting instead");
 			format = 0;
 			outputStream = stdout;
 		}
@@ -390,7 +468,7 @@ int main(int argc, char *argv[]) {
 
 		if (format) {
 			ret = pclose(outputStream);
-			if (ret != 0) { fprintf(stderr, "Error: failed to close pipe to column command to format list with code %d, leaving open", ret); }
+			if (ret != 0) { fprintf(stderr, "[ERROR] failed to close pipe to column command to format list with code %d, leaving open", ret); }
 		}
 
 
@@ -413,12 +491,12 @@ int main(int argc, char *argv[]) {
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to init libnspire"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
 
 		struct nspire_devinfo info = {0};
 		LOG("Getting device information..\n");
 		ret = nspire_device_info(handle, &info);
-		if (ret != NSPIRE_ERR_SUCCESS) { perrorn("[FATAL] failed to get info"); return ret; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to get info"); return 1; }
 		char const * const falseTrue_str[] = { "false", "true" };
 
 		/* Reading nspire_devinfo.hw_type
@@ -535,5 +613,5 @@ int main(int argc, char *argv[]) {
 
 	// invalid command
 	fprintf(stderr, "%s: unknown command '%s'\nTry '%s --help' for more information.\n", argv[0], argv[cmdArg_i], argv[0]);
-	return 1;
+	return 2;
 }

@@ -4,8 +4,9 @@ SRC := main.c
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)
 
-CFLAGS := -MMD -Wall -Wextra -Ofast
-LDFLAGS := -lnspire
+SANITIZE := -g -fsanitize=address -O0
+CFLAGS := -MMD -Wall -Wextra -Ofast $(SANITIZE)
+LDFLAGS := -lnspire $(SANITIZE)
 
 
 # % = wildcard
