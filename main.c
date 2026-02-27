@@ -25,6 +25,38 @@ printf("here\n"); fflush(stdout);
 #define DEBUG(message, ...) if (debug) { fprintf(stderr, "[DEBUG] " message, ##__VA_ARGS__); }
 
 
+#define CONCAT3(a, b, c) a##b##c
+#define UINT_TYPE(bits) CONCAT3(uint, bits, _t)
+
+#define BPP 16
+#define DATA_SIZE 320*240 * BPP/8
+#define PALLATE_LEN 2
+#define PALLATE_SIZE PALLATE_LEN * 4 * BPP/8
+
+struct __attribute__((packed)) bmpFormat {
+	char __attribute__((nonstring)) sig[2];
+	uint32_t fileSize;
+	uint8_t unused[4];
+	uint32_t offset;
+
+	uint32_t headerSize;
+	uint32_t width;
+	uint32_t height;
+	uint16_t planes;
+	uint16_t bpp;
+	uint32_t compression;
+	uint32_t compressedImageSize;
+	uint32_t xPixelsPerMeter;
+	uint32_t yPixelsPerMeter;
+	uint32_t colourRes;
+	uint32_t importantColours;
+};
+
+
+
+
+
+
 int ret = 0; // dont have to worry about making new ret variables everywhere. just dont use without setting before hand
 int verbose = 0; // -v flag
 int debug = 0; // -d flag
@@ -239,38 +271,37 @@ int main(int argc, char *argv[]) {
 	if (argc == 1) { printMainHelp(); return 0; }
 
 
-	int cmdArg_i = 1;
+	int cmdArg_i = 1; // start at argument 1
 
-	for (int arg_i = 1; arg_i < argc; arg_i++) {
-		if (argv[arg_i][0] == '-') {
-			if (argv[arg_i][1] == '-') {
-				if (strcmp(argv[arg_i] + 2, "verbose") == 0) { verbose = 1; DEBUG("Verbose logging enabled"); }
-				if (strcmp(argv[arg_i] + 2, "help") == 0) { printMainHelp(); return 0; }
-				else if (strcmp(argv[arg_i] + 2, "debug") == 0) { verbose = 1; debug = 1; DEBUG("Debug logging enabled"); }
-			} else if (argv[arg_i][1] == '\0') {
-				fprintf(stderr, "we need an option name twin\n");
-				return 2;
-			} else {
-				for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
-					switch (argv[arg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
-						case 'v': verbose = 1; break;
-						case 'd': debug = 1; verbose = 1; break;
-						default:  invalidGlobalOption(argv[arg_i][shortFlag_i]); return 2;
-					}
+	// loop through arguments, and save the first arg that doesnt start with '-' because that is the command
+	while (cmdArg_i < argc && argv[cmdArg_i][0] == '-') {
+		if (argv[cmdArg_i][1] == '-') {
+			if (strcmp(argv[cmdArg_i] + 2, "verbose") == 0) { verbose = 1; DEBUG("Verbose logging enabled"); }
+			if (strcmp(argv[cmdArg_i] + 2, "help") == 0) { printMainHelp(); return 0; }
+			else if (strcmp(argv[cmdArg_i] + 2, "debug") == 0) { verbose = 1; debug = 1; DEBUG("Debug logging enabled"); }
+		} else if (argv[cmdArg_i][1] == '\0') {
+			fprintf(stderr, "we need an option name twin\n");
+			return 2;
+		} else {
+			for (int shortFlag_i = 1; argv[cmdArg_i][shortFlag_i] != '\0'; shortFlag_i++) {
+				switch (argv[cmdArg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
+					case 'v': verbose = 1; break;
+					case 'd': debug = 1; verbose = 1; break;
+					default:  invalidGlobalOption(argv[cmdArg_i][shortFlag_i]); return 2;
 				}
 			}
-		} else {
-			cmdArg_i = arg_i;
-			goto parseSubcommand; // i could put the code for every subcommand here but this is cleaner
 		}
+
+		cmdArg_i++;
 	}
 
-	printMainHelp();
-	return 2;
+	if (cmdArg_i == argc) { // didnt get a command
+		printMainHelp();
+		return 2;
+	}
 
-	parseSubcommand:
 	if (strcmp(argv[cmdArg_i], "send") == 0) {
-		for (int i = cmdArg_i+1; i < argc; i++) { if (strcmp(argv[i], "--help") == 0) { printSendHelp(); }}
+		for (int i = cmdArg_i+1; i < argc; i++) { if (strcmp(argv[i], "--help") == 0) { printSendHelp(); return 0; }}
 		if (argc-1 < cmdArg_i + 1) { missingNamedOperand("send", "file"); return 2; }
 		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("send", "destination"); return 2; }
 
@@ -310,7 +341,7 @@ int main(int argc, char *argv[]) {
 		for (int arg_i = cmdArg_i+1; arg_i < argc; arg_i++) {
 			if (argv[arg_i][0] == '-') { // is the argument a flag?
 				if (argv[arg_i][1] == '-') { // its a long flag
-					if (strcmp(argv[arg_i] + 2, "help") == 0) { printReadHelp(); }
+					if (strcmp(argv[arg_i] + 2, "help") == 0) { printReadHelp(); return 0; }
 					else { unrecognizedSubcommandOption("read", argv[arg_i]); return 2; }
 				} else { // its a short flag
 					for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
@@ -358,7 +389,7 @@ int main(int argc, char *argv[]) {
 
 		LOG("Reading from file...\n");
 		ret = nspire_file_read(handle, srcPath, buffer, attr.size, &len);
-		if (ret != NSPIRE_ERR_SUCCESS) {nperrorf("[FATAL] failed to read file"); return 1; }
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to read file"); return 1; }
 		DEBUG("Read %zu bytes\n", len);
 		DEBUG("Writing to %s\n", destPath);
 		if (write(output_fd, buffer, attr.size) < 0) { perrorf("[FATAL] failed to write %zu bytes to file %s\n", len, destPath); return errno; }
@@ -371,7 +402,7 @@ int main(int argc, char *argv[]) {
 	} else if (strcmp(argv[cmdArg_i],"move")==0 || strcmp(argv[cmdArg_i],"mv")==0 || strcmp(argv[cmdArg_i],"copy")==0 || strcmp(argv[cmdArg_i],"cp")==0) {
 		char *command = argv[cmdArg_i];
 		if (argc - 1 >= cmdArg_i+1) {
-			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printMoveCopyHelp(); }
+			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printMoveCopyHelp(); return 0; }
 			else if (argv[cmdArg_i+1][0] == '-') {
 				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption(command, argv[cmdArg_i+1]); return 2; }
 				else { invalidSubcommandOption(command, argv[cmdArg_i+1][1]); return 2; }
@@ -394,7 +425,6 @@ int main(int argc, char *argv[]) {
 
 		ret = resolveDir(&ctx);
 		if (ret != 0) { return 1; }
-		DEBUG("ctx.path.path = %s\n", ctx.path.path);
 
 		for (int i = cmdArg_i + 1; i < argc - 1; i++) {
 			if (ctx.attr.type == NSPIRE_DIR) {
@@ -425,7 +455,7 @@ int main(int argc, char *argv[]) {
 			if (argv[arg_i][0] == '-') { // is the argument a flag?
 				if (argv[arg_i][1] == '-') { // its a long flag
 					if (strcmp(argv[arg_i] + 2, "no-format") == 0) { format = 0; DEBUG("Disabled output formatting\n"); }
-					else if (strcmp(argv[arg_i] + 2, "help") == 0) { printListHelp(); }
+					else if (strcmp(argv[arg_i] + 2, "help") == 0) { printListHelp(); return 0; }
 					else { unrecognizedSubcommandOption("list", argv[arg_i]); return 2; }
 				} else { // its a short flag
 					invalidSubcommandOption("list", argv[arg_i][1]);
@@ -480,7 +510,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	} else if (strcmp(argv[cmdArg_i], "info") == 0) {
 		if (argc - 1 >= cmdArg_i+1) {
-			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printInfoHelp(); }
+			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printInfoHelp(); return 0; }
 			else if (argv[cmdArg_i+1][0] == '-') {
 				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption("info", argv[cmdArg_i+1]); return 2; }
 				else { invalidSubcommandOption("info", argv[cmdArg_i+1][1]); return 2; }
@@ -528,7 +558,7 @@ int main(int argc, char *argv[]) {
 			"\n"
 			"Device type code: 0x%x (0b%.8b)\n"
 			"CX: %s\n"
-			"II: %s\n" // i need a better way to notate this
+			"CX II: %s\n"
 			"CAS: %s\n"
 			"\n"
 			"Screen resolution: %dpx x %dpx\n"
@@ -584,6 +614,68 @@ int main(int argc, char *argv[]) {
 		);
 
 		DEBUG("Freeing resources...\n");
+		nspire_free(handle);
+
+		return 0;
+	} else if (strcmp(argv[cmdArg_i], "screenshot") == 0) {
+		char *fileName = "screenshot.bmp";
+
+		if (argc - 1 >= cmdArg_i+1) {
+			if (argv[cmdArg_i+1][0] == '-') {
+				if (argv[cmdArg_i+1][1] == '-') {
+					if (strcmp(argv[cmdArg_i+1] + 2, "help") == 0) { printScreenshotHelp(); return 0; }
+					else { unrecognizedSubcommandOption("screenshot", argv[cmdArg_i+1]); return 2; }
+				} else { invalidSubcommandOption("screenshot", argv[cmdArg_i+1][1]); return 2; }
+			} else { fileName = argv[argc-1]; } // last arg is the filename, other filename args would just get overwritten
+		}
+
+		// init libnspire
+		LOG("Initializing usb connection...\n");
+		nspire_handle_t *handle;
+		ret = nspire_init(&handle);
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
+
+		LOG("Getting screenshot...\n");
+		struct nspire_image *image = NULL;
+		ret = nspire_screenshot(handle, &image);
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to get screenshot"); return 1; }
+
+		DEBUG("width = %d, height = %d, bpp = %d\n", image->width, image->height, image->bpp);
+
+		LOG("Saving screenshot...\n");
+		DEBUG("Opening file...")
+		FILE *file = fopen(fileName, "wb");
+		if (file == NULL) { perror("failed to open file"); return 1; }
+
+		struct bmpFormat bmp = {
+			.sig = "BM",
+			.fileSize = DATA_SIZE + 54, // total file size
+			.offset = 54, // offset to start of image data
+
+			.headerSize = 40,
+			.width = image->width,
+			.height = image->height,
+			.planes = 1, // idk
+			.bpp = image->bpp,
+			.compression = 0, // no compression
+			.compressedImageSize = 0, // ignored if theres no compression
+			.xPixelsPerMeter = 128,
+			.yPixelsPerMeter = 128,
+			.colourRes = 0,
+			.importantColours = 0, // 0 means all colours are important
+		};
+
+		DEBUG("Writing to file...")
+		fwrite(&bmp, sizeof(bmp), 1, file);
+
+		// image->data starts at top left but bitmaps start at bottom left for some reason
+		// the order of the columns are correct but the order of the rows must be inverted
+		for (int i = image->height-1; i >= 0; i--) {
+			fwrite(image->data + image->width * i * image->bpp/8, image->width, image->bpp/8, file);
+		}
+
+		DEBUG("Freeing resources...\n");
+		free(image);
 		nspire_free(handle);
 
 		return 0;

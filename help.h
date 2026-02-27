@@ -17,6 +17,7 @@
 #define printListHelp() printf(list_help_fmt, argv[0], argv[0])
 #define printMoveCopyHelp() printf(moveCopy_help_fmt, argv[0], argv[0], argv[0], argv[0], argv[0], argv[0])
 #define printInfoHelp() printf(info_help_fmt, argv[0], argv[0])
+#define printScreenshotHelp() printf(screenshot_help_fmt, argv[0], argv[0])
 #define printHelpHelp() printf(help_help_fmt, argv[0], argv[0])
 
 char const * const main_help_fmt =
@@ -32,14 +33,15 @@ char const * const main_help_fmt =
 	"  ones, please dont hesitate to contact me or submit a pull request.\n"
 	"\n"
 	"Commands:\n"
-	"  send        Send files to the device\n"
+	"  send        Send a file or directory to the device\n"
 	"  read        Read a file from the device\n"
-	"  move, mv    Move or rename files\n"
-	"  copy, cp    Duplicate files\n"
-	"  list, ls    List files in a folder\n"
+	"  move, mv    Move or rename a file or directory\n"
+	"  copy, cp    Duplicate a file or directory\n"
+	"  list, ls    List files in a directory\n"
 	// "  del, rm     Delete a file or directory\n"
 	"  info        Show OS and device information\n"
-	"  help        Show this help or help for a command\n"
+	"  help        Show this help or the help for a command\n"
+	"  screenshot  Take a screenshot of the device\n"
 	"\n"
 	"Options:\n"
 	"  -v, --verbose     log what is being done\n"
@@ -53,7 +55,7 @@ char const * const send_help_fmt =
 	"%s send - send files to the connected calculator"
 	"\n"
 	"Usage:\n"
-	"  %s send <file>... <destination>\n"
+	"  %s send [option]... <file>... <destination>\n"
 	"\n"
 	"Description:\n"
 	"  Copies one or more files or directories to the specified location on the\n"
@@ -84,13 +86,13 @@ char const * const read_help_fmt =
 ;
 
 char const * const list_help_fmt =
-	"%s list - list the files and folders in a specified directory\n"
+	"%s list, ls - list the files and folders in a specified directory\n"
 	"\n"
 	"Usage:\n"
-	"  %s list [option]... <file>...\n"
+	"  %s list [option]... <directory>...\n"
 	"\n"
 	"Description:\n"
-	"  Reads a file and prints its contents to stdout\n"
+	"  Lists the files in <directory> like the `ls` command\n"
 	"\n"
 	"Options:\n"
 	"      --no-format   dont format the list\n"
@@ -98,7 +100,8 @@ char const * const list_help_fmt =
 ;
 
 char const * const moveCopy_help_fmt =
-	"%s move, %s copy - move or copy a file or directory within the calculator\n"
+	"%s move, mv - move a file or directory within the device\n"
+	"%s copy, cp - copy a file or directory within the device\n"
 	"\n"
 	"Usage:\n"
 	"  %s move [option]... <file>... <directory>\n"
@@ -120,10 +123,10 @@ char const * const moveCopy_help_fmt =
 ;
 
 char const * const info_help_fmt =
-	"%s info - get information related to the connected calculator\n"
+	"%s info - get information related to the connected device\n"
 	"\n"
 	"Usage:\n"
-	"  %s info\n"
+	"  %s info [option]...\n"
 	"\n"
 	"Description:\n"
 	"  Prints out all the fields filled in by `nspire_device_info` and formats it.\n"
@@ -136,11 +139,30 @@ char const * const info_help_fmt =
 	"      --help        show this help\n"
 ;
 
+char const * const screenshot_help_fmt =
+	"%s screenshot - take a screenshot of the device\n"
+	"\n"
+	"Usage:\n"
+	"  %s screenshot [option]... [file]\n"
+	"\n"
+	"Description:\n"
+	"  Take a screenshot of the device and save the image as `screenshot.bmp`, or\n"
+	"  [file] if provided. Assumes that the device bpp is 16 because I don't have any\n"
+	"  way to test 8bpp or 24bpp with real data. 24 bpp should work though. When\n"
+	"  using 8bpp in a bitmap file for some reason it requires that you use a palate\n"
+	"  and declare all the colours you use before the image data, and reference each\n"
+	"  colour by index. If anyone has 8bpp or 24bpp image data it would be great if\n"
+	"  you could send it to me or make a pull request.\n"
+	"\n"
+	"Options:\n"
+	"      --help        show this help\n"
+;
+
 char const * const help_help_fmt =
 	"%s help - display help information about nspirectl\n"
 	"\n"
 	"Usage:\n"
-	"  %s help [command]\n"
+	"  %s help [option]... [command]\n"
 	"\n"
 	"Description:\n"
     "  With no command name, general help for nspirectl is given. With a command\n"
@@ -149,7 +171,5 @@ char const * const help_help_fmt =
     "Options:\n"
     "      --help        show this help\n"
 ;
-
-// extern inline void requiresAnArgument(char *argv0, char c);
 
 #endif
