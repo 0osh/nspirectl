@@ -4,6 +4,8 @@ SRC := main.c
 OBJ := $(SRC:.c=.o)
 DEP := $(OBJ:.o=.d)
 
+BINDIR ?= /usr/local/bin
+
 SANITIZE := -g -fsanitize=address -O0
 CFLAGS := -MMD -Wall -Wextra -Ofast $(SANITIZE)
 LDFLAGS := -lnspire $(SANITIZE)
@@ -23,6 +25,9 @@ $(TARGET): $(OBJ)
 %.o: %.c
 	@echo "Compiling $< -> $@"
 	@$(CC) $(CFLAGS) -c $< -o $@
+
+install: $(TARGET)
+	@cp $(TARGET) $(BINDIR)
 
 clean:
 	@echo "Removing dependency files (*.d)"

@@ -101,6 +101,34 @@ int pathcmp(const char *s1, const char *s2) {
 	}
 }
 
+int loadFile(const char *path, char **file_data, long *file_len) {
+	DEBUG("Reading file from disk...\n");
+	FILE *file_fd = fopen(path, "rb");
+	if (!file_fd) { perrorf("[FATAL] failed to open file %s", path); return errno; }
+
+	ret = fseek(file_fd, 0, SEEK_END);
+	if (ret < 0) { perrorf("[FATAL] failed to fseek to file %s end", path); return errno; }
+
+	*file_len = ftell(file_fd);
+	if (*file_len < 0) { perrorf("[FATAL] failed to get file %s length", path); return errno; }
+	else if (*file_len == 0) {
+		sendEmptyFileConfirmation: // i could use a do while but its harder to read and i like gotos
+		fputs("[WARNING] file length is 0. Continue? (y/n)  ", stderr);
+		char c = getchar();
+		if (c == 'n' || c == 'N') { return 0; }
+		else if (c != 'y' && c != 'Y') { goto sendEmptyFileConfirmation; }
+	}
+
+	ret = fseek(file_fd, 0, SEEK_SET);
+	if (ret < 0) { perrorf("[FATAL] failed to fseek back to file %s start", path); return errno; }
+
+	*file_data = malloc(*file_len);
+	fread(*file_data, *file_len, 1, file_fd);
+	fclose(file_fd);
+
+	return 0;
+}
+
 // init a dynPath struct with a file (and its length for efficiency)
 int initPathWithFile(struct dynPath *ctx, const char *path, size_t pathLen) {
 	ctx->len = pathLen;
@@ -129,7 +157,7 @@ int resolveDir(struct cmd_ctx *ctx) {
 	if (ret == -NSPIRE_ERR_NONEXIST) {
 		// if path is a directory OR there is more than 1 file (means path must be a directory)
 		// error out because the directory doesent exist
-		if ((ctx->path.path)[ctx->path.len-1] == '/' || ctx->argc-1 > ctx->cmdArg_i+2) { fprintf(stderr, "[FATAL] path `%s` doesnt exist\n", ctx->path.path); return -NSPIRE_ERR_NONEXIST; }
+		if ((ctx->path.path)[ctx->path.len-1] == '/' || ctx->argc-1 >= ctx->cmdArg_i+1) { fprintf(stderr, "[FATAL] path `%s` doesnt exist\n", ctx->path.path); return -NSPIRE_ERR_NONEXIST; }
 		DEBUG("path %s is a non-existing file\n", ctx->path.path);
 		return initPathWithFile(&ctx->path, ctx->path.path, ctx->path.len); // return 0 if it was ok too
 	} else if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to get file info"); return ret; }
@@ -220,30 +248,10 @@ int sendPath(struct nspire_handle *handle, char *src, char *dest) {
 	// else, src is a file
 
 	// get file
-	DEBUG("Reading file from disk...\n");
-	FILE *file_fd = fopen(src, "rb");
-	if (!file_fd) { perrorf("[FATAL] failed to open file %s", src); return errno; }
-
-	ret = fseek(file_fd, 0, SEEK_END);
-	if (ret < 0) { perrorf("[FATAL] failed to fseek to file %s end", src); return errno; }
-
-	long file_len = ftell(file_fd);
-	if (file_len < 0) { perrorf("[FATAL] failed to get file %s length", src); return errno; }
-	else if (file_len == 0) {
-		sendEmptyFileConfirmation: // i could use a do while but its harder to read and i like gotos
-		fputs("[WARNING] file length is 0. Continue? (y/n)  ", stderr);
-		char c = getchar();
-		if (c == 'n' || c == 'N') { return 0; }
-		else if (c != 'y' && c != 'Y') { goto sendEmptyFileConfirmation; }
-	}
-
-	ret = fseek(file_fd, 0, SEEK_SET);
-	if (ret < 0) { perrorf("[FATAL] failed to fseek back to file %s start", src); return errno; }
-
-	char *file_data = malloc(file_len + 1);
-	fread(file_data, file_len, 1, file_fd);
-	fclose(file_fd);
-	file_data[file_len] = '\0';
+	char *file_data = NULL;
+	long file_len = 0;
+	ret = loadFile(src, &file_data, &file_len);
+	if (ret != 0) { return ret; }
 
 	// send it to the calculator (with .tns if needed)
 	LOG("Uploading %s to %s\n", src, dest);
@@ -254,7 +262,7 @@ int sendPath(struct nspire_handle *handle, char *src, char *dest) {
 		strcpy(dest + destLen, ".tns");
 		DEBUG("Added .tns extention (%s)\n", dest);
 		ret = nspire_file_write(handle, dest, file_data, file_len);
-		free(dest);
+		free(dest);\
 	} else { ret = nspire_file_write(handle, dest, file_data, file_len); }
 	if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to send file %s", src); free(file_data); return ret; }
 
@@ -300,10 +308,10 @@ int main(int argc, char *argv[]) {
 		return 2;
 	}
 
-	if (strcmp(argv[cmdArg_i], "send") == 0) {
+	if (strcmp(argv[cmdArg_i], "send") == 0 || strcmp(argv[cmdArg_i], "upload") == 0) {
 		for (int i = cmdArg_i+1; i < argc; i++) { if (strcmp(argv[i], "--help") == 0) { printSendHelp(); return 0; }}
-		if (argc-1 < cmdArg_i + 1) { missingNamedOperand("send", "file"); return 2; }
-		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("send", "destination"); return 2; }
+		if (argc-1 < cmdArg_i + 1) { missingNamedOperand("file"); return 2; }
+		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("destination"); return 2; }
 
 		// init libnspire
 		LOG("Initializing usb connection...\n");
@@ -334,7 +342,7 @@ int main(int argc, char *argv[]) {
 		nspire_free(handle);
 
 		return 0;
-	} else if (strcmp(argv[cmdArg_i], "read") == 0) {
+	} else if (strcmp(argv[cmdArg_i], "read") == 0 || strcmp(argv[cmdArg_i], "download") == 0) {
 		int output_fd = 1; // stdout by default
 		char *srcPath = NULL;
 		char *destPath = "stdout";
@@ -342,7 +350,7 @@ int main(int argc, char *argv[]) {
 			if (argv[arg_i][0] == '-') { // is the argument a flag?
 				if (argv[arg_i][1] == '-') { // its a long flag
 					if (strcmp(argv[arg_i] + 2, "help") == 0) { printReadHelp(); return 0; }
-					else { unrecognizedSubcommandOption("read", argv[arg_i]); return 2; }
+					else { unrecognizedSubcommandOption(argv[arg_i]); return 2; }
 				} else { // its a short flag
 					for (int shortFlag_i = 1; argv[arg_i][shortFlag_i] != '\0'; shortFlag_i++) {
 						switch (argv[arg_i][shortFlag_i]) { // its a short flag, iterate through each item in it
@@ -359,7 +367,7 @@ int main(int argc, char *argv[]) {
 								DEBUG("Set output file to %s\n", destPath);
 								goto shortFlag_exit;
 							default: // invalid option
-								invalidSubcommandOption("read", argv[arg_i][shortFlag_i]);
+								invalidSubcommandOption(argv[arg_i][shortFlag_i]);
 								return 2;
 						}
 					}
@@ -368,7 +376,15 @@ int main(int argc, char *argv[]) {
 			} else { srcPath = argv[arg_i]; DEBUG("Set source file to %s\n", srcPath); } // setting file to read doesnt need a flag
 		}
 
-		if (!srcPath) { missingOperand("read"); return 2; }
+		if (argv[cmdArg_i][0] == 'd' && output_fd == 1) { // download used and a file has not already been set
+			char *basename = argv[cmdArg_i+1] + strlen(argv[cmdArg_i+1]);
+			while (basename >= argv[cmdArg_i+1] && *basename != '/') { basename--; }
+			basename++;
+			output_fd = open(basename, O_WRONLY | O_CREAT, 0755);
+			if (output_fd < 0) { perrorf("[FATAL] failed to open output file %s", argv[cmdArg_i+1]); return 1; }
+		}
+
+		if (!srcPath) { missingOperand(); return 2; }
 
 		// init libnspire
 		LOG("Initializing usb connection...\n");
@@ -400,17 +416,16 @@ int main(int argc, char *argv[]) {
 
 		return 0;
 	} else if (strcmp(argv[cmdArg_i],"move")==0 || strcmp(argv[cmdArg_i],"mv")==0 || strcmp(argv[cmdArg_i],"copy")==0 || strcmp(argv[cmdArg_i],"cp")==0) {
-		char *command = argv[cmdArg_i];
-		if (argc - 1 >= cmdArg_i+1) {
+		if (argc-1 >= cmdArg_i+1) { // dont need a for loop cause the first one will always be invalid, since there arent any flags
 			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printMoveCopyHelp(); return 0; }
 			else if (argv[cmdArg_i+1][0] == '-') {
-				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption(command, argv[cmdArg_i+1]); return 2; }
-				else { invalidSubcommandOption(command, argv[cmdArg_i+1][1]); return 2; }
+				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption(argv[cmdArg_i+1]); return 2; }
+				else { invalidSubcommandOption(argv[cmdArg_i+1][1]); return 2; }
 			}
 		}
 
-		if (argc-1 < cmdArg_i + 1) { missingNamedOperand(command, "file"); return 2; }
-		if (argc-1 < cmdArg_i + 2) { missingNamedOperand(command, "destination"); return 2; }
+		if (argc-1 < cmdArg_i + 1) { missingNamedOperand("file"); return 2; }
+		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("destination"); return 2; }
 
 		LOG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
@@ -436,7 +451,7 @@ int main(int argc, char *argv[]) {
 			LOG("Copying %s to %s\n", argv[i], ctx.path.path);
 			ret = nspire_file_copy(handle, argv[i], ctx.path.path);
 			if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to copy file %s to %s", argv[i], ctx.path.path); return 1; }
-			if (command[0] == 'm') { // m for move
+			if (argv[cmdArg_i][0] == 'm') { // m for move
 				DEBUG("Removing original (%s)\n", argv[i]);
 				ret = nspire_file_delete(handle, argv[i]);
 				if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to remove file %s", argv[i]); return 1; }
@@ -456,9 +471,9 @@ int main(int argc, char *argv[]) {
 				if (argv[arg_i][1] == '-') { // its a long flag
 					if (strcmp(argv[arg_i] + 2, "no-format") == 0) { format = 0; DEBUG("Disabled output formatting\n"); }
 					else if (strcmp(argv[arg_i] + 2, "help") == 0) { printListHelp(); return 0; }
-					else { unrecognizedSubcommandOption("list", argv[arg_i]); return 2; }
+					else { unrecognizedSubcommandOption(argv[arg_i]); return 2; }
 				} else { // its a short flag
-					invalidSubcommandOption("list", argv[arg_i][1]);
+					invalidSubcommandOption(argv[arg_i][1]);
 					return 2;
 				}
 
@@ -508,12 +523,12 @@ int main(int argc, char *argv[]) {
 		nspire_free(handle);
 
 		return 0;
-	} else if (strcmp(argv[cmdArg_i], "info") == 0) {
-		if (argc - 1 >= cmdArg_i+1) {
+	} else if (strcmp(argv[cmdArg_i], "info") == 0 || strcmp(argv[cmdArg_i], "stats") == 0) {
+		if (argc-1 >= cmdArg_i+1) { // dont need a for loop cause the first one will always be invalid, since there arent any flags
 			if (strcmp(argv[cmdArg_i+1], "--help") == 0) { printInfoHelp(); return 0; }
 			else if (argv[cmdArg_i+1][0] == '-') {
-				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption("info", argv[cmdArg_i+1]); return 2; }
-				else { invalidSubcommandOption("info", argv[cmdArg_i+1][1]); return 2; }
+				if (argv[cmdArg_i+1][1] == '-') { unrecognizedSubcommandOption(argv[cmdArg_i+1]); return 2; }
+				else { invalidSubcommandOption(argv[cmdArg_i+1][1]); return 2; }
 			}
 		}
 
@@ -618,15 +633,14 @@ int main(int argc, char *argv[]) {
 
 		return 0;
 	} else if (strcmp(argv[cmdArg_i], "screenshot") == 0) {
-		char *fileName = "screenshot.bmp";
-
-		if (argc - 1 >= cmdArg_i+1) {
+		char *file_path = "screenshot.bmp";
+		if (argc-1 >= cmdArg_i+1) { // dont need a for loop cause the first one will always be invalid, since there arent any flags
 			if (argv[cmdArg_i+1][0] == '-') {
 				if (argv[cmdArg_i+1][1] == '-') {
 					if (strcmp(argv[cmdArg_i+1] + 2, "help") == 0) { printScreenshotHelp(); return 0; }
-					else { unrecognizedSubcommandOption("screenshot", argv[cmdArg_i+1]); return 2; }
-				} else { invalidSubcommandOption("screenshot", argv[cmdArg_i+1][1]); return 2; }
-			} else { fileName = argv[argc-1]; } // last arg is the filename, other filename args would just get overwritten
+					else { unrecognizedSubcommandOption(argv[cmdArg_i+1]); return 2; }
+				} else { invalidSubcommandOption(argv[cmdArg_i+1][1]); return 2; }
+			} else { file_path = argv[argc-1]; } // last arg is the filename, other filename args would just get overwritten
 		}
 
 		// init libnspire
@@ -644,13 +658,13 @@ int main(int argc, char *argv[]) {
 
 		LOG("Saving screenshot...\n");
 		DEBUG("Opening file...")
-		FILE *file = fopen(fileName, "wb");
+		FILE *file = fopen(file_path, "wb");
 		if (file == NULL) { perror("failed to open file"); return 1; }
 
 		struct bmpFormat bmp = {
 			.sig = "BM",
-			.fileSize = DATA_SIZE + 54, // total file size
-			.offset = 54, // offset to start of image data
+			.fileSize = image->width * image->height + 54, // total file size
+			.offset = 54, // byte offset to start of image data
 
 			.headerSize = 40,
 			.width = image->width,
@@ -668,6 +682,34 @@ int main(int argc, char *argv[]) {
 		DEBUG("Writing to file...")
 		fwrite(&bmp, sizeof(bmp), 1, file);
 
+		for (int i = 0; i < 8; i++) {
+			printf("%08b, ", image->data[i]);
+		}
+		putc('\n', stdout);
+
+		for (int i = 0; i < 4; i++) {
+			printf("%08b, ", image->data[i + image->width*200 * image->bpp/8]);
+		}
+		putc('\n', stdout);
+
+		// output format: 0bGGGBBBBB, 0bRRRRRGGG
+
+		// bmp files are in BGR and the data is in RGB so we need to swap R and B
+		for (int i = 0; i < image->width * image->height * image->bpp/8; i += 2) {
+			char temp = image->data[i];
+			// image->data[i] = (image->data[i+1] << 5) | (image->data[i] & 0b00011111); // set highest 5 bits from i to lowest 5 bits from i+1
+			// image->data[i+1] = (temp >> 5) | (image->data[i+1] & 0b11111000); // set lowest 5 bits from temp to highest 5 bits from i+1
+			// image->data[i] &= 0b11100000;
+			// image->data[i+1] &= 0b00000111;
+			image->data[i+1] = ((image->data[i+1] & 0b11110000) >> 1) | ((image->data[i+1] & 0b00001000) << 4) | (image->data[i+1] & 0b00000111);
+			// image->data[i+1] &= 0b00000111;
+		}
+
+		for (int i = 0; i < 4; i++) {
+			printf("%08b, ", image->data[i + image->width*200 * image->bpp/8]);
+		}
+		putc('\n', stdout);
+
 		// image->data starts at top left but bitmaps start at bottom left for some reason
 		// the order of the columns are correct but the order of the rows must be inverted
 		for (int i = image->height-1; i >= 0; i--) {
@@ -676,24 +718,46 @@ int main(int argc, char *argv[]) {
 
 		DEBUG("Freeing resources...\n");
 		free(image);
+		fclose(file);
 		nspire_free(handle);
 
 		return 0;
-	} else if (strcmp(argv[cmdArg_i], "help") == 0) {
-		for (int arg_i = cmdArg_i+1; arg_i < argc; arg_i++) {
-			if (argv[arg_i][0] == '-') { // is the argument a flag?
-				if (argv[arg_i][1] == '-') { // its a long flag
-					if (strcmp(argv[arg_i] + 2, "help") == 0) { printHelpHelp(); return 0; }
-					else { unrecognizedSubcommandOption("help", argv[arg_i]); return 2; }
-				} else { // its a short flag
-					invalidSubcommandOption("help", argv[arg_i][1]);
-					return 2;
-				}
-			} else {
-				fprintf(stderr, "%s: unknown command '%s'\nTry '%s help --help' for more information.\n", argv[0], argv[arg_i], argv[0]);
-				return 2;
-			}
+	} else if (strcmp(argv[cmdArg_i], "update") == 0) {
+		char *file_path = NULL;
+		if (argc-1 >= cmdArg_i+1) {
+			if (argv[cmdArg_i+1][0] == '-') {
+				if (argv[cmdArg_i+1][1] == '-') {
+					if (strcmp(argv[cmdArg_i+1] + 2, "help") == 0) { printUpdateHelp(); return 0; }
+					else { unrecognizedSubcommandOption(argv[cmdArg_i+1]); return 2; }
+				} else { invalidSubcommandOption(argv[cmdArg_i+1][1]); return 2; }
+			} else { file_path = argv[argc-1]; } // last arg is the filename, other filename args would just get overwritten
 		}
+
+		// init libnspire
+		LOG("Initializing usb connection...\n");
+		nspire_handle_t *handle;
+		ret = nspire_init(&handle);
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
+
+		// get file
+		char *file_data = NULL;
+		long file_len = 0;
+		ret = loadFile(file_path, &file_data, &file_len);
+		if (ret != 0) { return ret; }
+
+		LOG("Sending OS...\n");
+		ret = nspire_os_send(handle, file_data, file_len);
+		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to send OS. Your device may be in an unstable state if only partial data was written. Please proceed with caution"); return 1; }
+
+	} else if (strcmp(argv[cmdArg_i], "help") == 0) {
+		if (argc-1 >= cmdArg_i+1) {
+			if (argv[cmdArg_i+1][0] == '-') { // is the argument a flag?
+				if (argv[cmdArg_i+1][1] == '-') { // its a long flag
+					if (strcmp(argv[cmdArg_i+1] + 2, "help") == 0) { printHelpHelp(); return 0; }
+					else { unrecognizedSubcommandOption(argv[cmdArg_i+1]); return 2; }
+				} else { invalidSubcommandOption(argv[cmdArg_i+1][1]); return 2; }
+			}
+		} else { printMainHelp(); return 0; }
 
 		if (strcmp(argv[cmdArg_i+1], "send") == 0) { printSendHelp(); return 0; }
 		if (strcmp(argv[cmdArg_i+1], "read") == 0) { printReadHelp(); return 0; }
@@ -701,6 +765,9 @@ int main(int argc, char *argv[]) {
 		if (strcmp(argv[cmdArg_i+1], "move") == 0 || strcmp(argv[cmdArg_i+1], "copy") == 0) { printMoveCopyHelp(); return 0; }
 		if (strcmp(argv[cmdArg_i+1], "info") == 0) { printInfoHelp(); return 0; }
 		if (strcmp(argv[cmdArg_i+1], "help") == 0) { printHelpHelp(); return 0; }
+
+		fprintf(stderr, "%s: unknown command '%s'\nTry '%s help --help' for more information.\n", argv[0], argv[cmdArg_i+1], argv[0]);
+		return 2;
 	}
 
 	// invalid command

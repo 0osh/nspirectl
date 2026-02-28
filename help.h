@@ -4,12 +4,12 @@
 #include <stdio.h>
 
 #define requiresAnArgument(option) fprintf(stderr, "%s: option requires an argument -- '%c'\nTry '%s --help' for more information.\n", argv[0], option, argv[0])
-#define missingOperand(cmd) fprintf(stderr, "%s %s: missing operand\nTry '%s %s --help' for more information.\n", argv[0], cmd, argv[0], cmd)
-#define missingNamedOperand(cmd, operand) fprintf(stderr, "%s %s: missing %s operand\nTry '%s %s --help' for more information.\n", argv[0], cmd, operand, argv[0], cmd)
+#define missingOperand() fprintf(stderr, "%s %s: missing operand\nTry '%s %s --help' for more information.\n", argv[0], argv[cmdArg_i], argv[0], argv[cmdArg_i])
+#define missingNamedOperand(operand) fprintf(stderr, "%s %s: missing %s operand\nTry '%s %s --help' for more information.\n", argv[0], argv[cmdArg_i], operand, argv[0], argv[cmdArg_i])
 #define unrecognizedGlobalOption(option) fprintf(stderr, "%s: unrecognized option '%s'\nTry '%s --help' for more information.\n", argv[0], option, argv[0])
-#define unrecognizedSubcommandOption(cmd, option) fprintf(stderr, "%s %s: unrecognized option '%s'\nTry '%s %s --help' for more information.\n", argv[0], cmd, option, argv[0], cmd)
+#define unrecognizedSubcommandOption(option) fprintf(stderr, "%s %s: unrecognized option '%s'\nTry '%s %s --help' for more information.\n", argv[0], argv[cmdArg_i], option, argv[0], argv[cmdArg_i])
 #define invalidGlobalOption(option) fprintf(stderr, "%s: invalid option -- '%c'\nTry '%s --help' for more information.\n", argv[0], option, argv[0])
-#define invalidSubcommandOption(cmd, option) fprintf(stderr, "%s %s: invalid option -- '%c'\nTry '%s %s --help' for more information.\n", argv[0], cmd, option, argv[0], cmd)
+#define invalidSubcommandOption(option) fprintf(stderr, "%s %s: invalid option -- '%c'\nTry '%s %s --help' for more information.\n", argv[0], argv[cmdArg_i], option, argv[0], argv[cmdArg_i])
 
 #define printMainHelp() printf(main_help_fmt, argv[0], argv[0], argv[0])
 #define printSendHelp() printf(send_help_fmt, argv[0], argv[0])
@@ -18,6 +18,7 @@
 #define printMoveCopyHelp() printf(moveCopy_help_fmt, argv[0], argv[0], argv[0], argv[0], argv[0], argv[0])
 #define printInfoHelp() printf(info_help_fmt, argv[0], argv[0])
 #define printScreenshotHelp() printf(screenshot_help_fmt, argv[0], argv[0])
+#define printUpdateHelp() printf(update_help_fmt, argv[0], argv[0])
 #define printHelpHelp() printf(help_help_fmt, argv[0], argv[0])
 
 char const * const main_help_fmt =
@@ -33,26 +34,27 @@ char const * const main_help_fmt =
 	"  ones, please dont hesitate to contact me or submit a pull request.\n"
 	"\n"
 	"Commands:\n"
-	"  send        Send a file or directory to the device\n"
-	"  read        Read a file from the device\n"
-	"  move, mv    Move or rename a file or directory\n"
-	"  copy, cp    Duplicate a file or directory\n"
-	"  list, ls    List files in a directory\n"
-	// "  del, rm     Delete a file or directory\n"
-	"  info        Show OS and device information\n"
-	"  help        Show this help or the help for a command\n"
-	"  screenshot  Take a screenshot of the device\n"
+	"  send, upload      Send a file or directory to the device\n"
+	"  read, download    Read a file from the device\n"
+	"  move, mv          Move or rename a file or directory\n"
+	"  copy, cp          Duplicate a file or directory\n"
+	"  list, ls          List files in a directory\n"
+	// "  del, rm         Delete a file or directory\n" // im too scared im gonna screw it up and delete the wrong things
+	"  info              Show OS and device information\n"
+	"  screenshot        Take a screenshot of the device\n"
+	"  update            Update the OS on the calculator\n"
+	"  help              Show this help or the help for a command\n"
 	"\n"
 	"Options:\n"
 	"  -v, --verbose     log what is being done\n"
-	"  -d, --debug       print out values as well (implies -v)\n"
+	"  -d, --debug       extra logging (implies -v)\n"
 	"      --help        show this help\n"
 	"\n"
-	"Run '%s help <command>' for details.\n"
+	"Run '%s help <command>' for more information.\n"
 ;
 
 char const * const send_help_fmt =
-	"%s send - send files to the connected calculator"
+	"%s send, upload - send files to the connected calculator"
 	"\n"
 	"Usage:\n"
 	"  %s send [option]... <file>... <destination>\n"
@@ -73,10 +75,14 @@ char const * const send_help_fmt =
 ;
 
 char const * const read_help_fmt =
-	"%s read - reads a file and prints its contents to stdout\n"
+	"%s read, download - reads a file\n"
 	"\n"
 	"Usage:\n"
 	"  %s read [option]... <file>...\n"
+	"Description:\n"
+	"  Reads the contents of a file or directory. If `read` is used, it will print\n"
+	"  the contents to stdout. If `download` is used, it will save the contents to a\n"
+	"  file with the same name and directory structure.\n"
 	"\n"
 	"Options:\n"
 	"  -o <file>         write output to the specified file instead of stdout. The\n"
@@ -86,7 +92,7 @@ char const * const read_help_fmt =
 ;
 
 char const * const list_help_fmt =
-	"%s list, ls - list the files and folders in a specified directory\n"
+	"%s list, ls - list directory contents\n"
 	"\n"
 	"Usage:\n"
 	"  %s list [option]... <directory>...\n"
@@ -100,8 +106,8 @@ char const * const list_help_fmt =
 ;
 
 char const * const moveCopy_help_fmt =
-	"%s move, mv - move a file or directory within the device\n"
-	"%s copy, cp - copy a file or directory within the device\n"
+	"%s move, mv - move/rename files and directories within the device\n"
+	"%s copy, cp - copy files and directories within the device\n"
 	"\n"
 	"Usage:\n"
 	"  %s move [option]... <file>... <directory>\n"
@@ -153,6 +159,19 @@ char const * const screenshot_help_fmt =
 	"  and declare all the colours you use before the image data, and reference each\n"
 	"  colour by index. If anyone has 8bpp or 24bpp image data it would be great if\n"
 	"  you could send it to me or make a pull request.\n"
+	"\n"
+	"Options:\n"
+	"      --help        show this help\n"
+;
+
+char const * const update_help_fmt =
+	"%s update - update the device OS\n"
+	"\n"
+	"Usage:\n"
+	"  %s update [option]... <file>\n"
+	"\n"
+	"Description:\n"
+	"  Send an OS from <file> to the device. This is used to update the OS.\n"
 	"\n"
 	"Options:\n"
 	"      --help        show this help\n"
