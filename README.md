@@ -1,6 +1,11 @@
-## nspirectl - Manage files on TI-nspire devices
+# nspirectl - Manage files on TI-nspire devices
 
-**WIP, may have bugs**
+> [!IMPORTANT]
+> There are already lots of well maintained repos centered around file management on nspire devices. So unless anyone wants me to work more on this project, I'm not going to be putting much effort into it anymore. It serves my needs and I'd rather spend my time making something people will actually use. (well, more than this anyways)
+>
+> However, if you do find good use of this and want updates, open a quick issue saying that you do and I'll start updating again. But until then, don't expect anything major.
+
+***
 
 A command line wrapper for the libnspire functions as a command line tool. I made this mostly because I just cant get tilp to work. If there's any mistakes or you have any suggestions, even tiny little picky ones, dont hesitate to contact me or submit a pull request.
 
