@@ -1,3 +1,6 @@
+> [!WARNING]
+> ive moved to codeberg, dont rely on this repo. (codeberg is like github but no microslop) https://codeberg.org/oosh/nspirectl
+
 # nspirectl - Manage files on TI-nspire devices
 
 > [!IMPORTANT]
