@@ -24,10 +24,6 @@ printf("here\n"); fflush(stdout);
 #define LOG(message, ...) if (verbose) { fprintf(stderr, "[LOG] " message, ##__VA_ARGS__); }
 #define DEBUG(message, ...) if (debug) { fprintf(stderr, "[DEBUG] " message, ##__VA_ARGS__); }
 
-
-#define CONCAT3(a, b, c) a##b##c
-#define UINT_TYPE(bits) CONCAT3(uint, bits, _t)
-
 #define BPP 16
 #define DATA_SIZE 320*240 * BPP/8
 #define PALLATE_LEN 2
@@ -314,7 +310,7 @@ int main(int argc, char *argv[]) {
 		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("destination"); return 2; }
 
 		// init libnspire
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
@@ -387,7 +383,7 @@ int main(int argc, char *argv[]) {
 		if (!srcPath) { missingOperand(); return 2; }
 
 		// init libnspire
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
@@ -427,7 +423,7 @@ int main(int argc, char *argv[]) {
 		if (argc-1 < cmdArg_i + 1) { missingNamedOperand("file"); return 2; }
 		if (argc-1 < cmdArg_i + 2) { missingNamedOperand("destination"); return 2; }
 
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
@@ -481,7 +477,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		// init libnspire
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
@@ -533,7 +529,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		// init libnspire
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
@@ -644,7 +640,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		// init libnspire
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
@@ -734,7 +730,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		// init libnspire
-		LOG("Initializing usb connection...\n");
+		DEBUG("Initializing usb connection...\n");
 		nspire_handle_t *handle;
 		ret = nspire_init(&handle);
 		if (ret != NSPIRE_ERR_SUCCESS) { nperrorf("[FATAL] failed to init libnspire"); return 1; }
